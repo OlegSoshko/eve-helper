@@ -67,7 +67,7 @@ async def read_root():
 async def get_current_price():
     try:
         # Получаем свежую цену (не кэшированную)
-        current_price = await monitor.get_plex_price()
+        current_price = await monitor.get_plex_order()
         
         if current_price is None:
             raise HTTPException(

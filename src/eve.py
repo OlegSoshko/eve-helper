@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 class PLEXMonitor:
   def __init__(self, telegram_bot: TelegramBot):
-    self.interval = 300
+    self.interval = 900
     self.active = True
     self.last_price = None
     self.bot = telegram_bot
     self.session = None
     logger.info(f"Инициализация PLEXMonitor с интервалом {self.interval} секунд")
 
-  async def get_plex_price(self):
+  async def get_plex_order(self):
     """Получить текущую цену PLEX в Jita"""
     logger.info("Начало запроса цены PLEX")
     if not self.session:
@@ -42,9 +42,21 @@ class PLEXMonitor:
         orders = await response.json()
         logger.info(f"Получено {len(orders)} ордеров")
         if orders:
-          min_price = min(order['price'] for order in orders)
-          logger.info(f"Минимальная цена PLEX: {min_price}")
-          return min_price
+          min_order = min(orders, key=lambda x: x['price'])
+          logger.info(f"Найден ордер с минимальной ценой: {min_order['price']}")
+          
+          location_id = min_order['location_id']
+          location_url = f"https://esi.evetech.net/latest/universe/stations/{location_id}/"
+          try:
+            async with self.session.get(location_url, timeout=10) as location_response:
+              location_response.raise_for_status()
+              location_data = await location_response.json()
+              min_order['location_name'] = location_data['name']
+          except Exception as e:
+            logger.warning(f"Не удалось получить название локации: {e}")
+            min_order['location_name'] = f"Unknown Location ({location_id})"
+          
+          return min_order
         else:
           logger.warning("Не получено ни одного ордера")
           return None
@@ -64,12 +76,17 @@ class PLEXMonitor:
     logger.info("Запуск цикла мониторинга")
     while self.active:
       logger.info("Начало нового цикла мониторинга")
-      price = await self.get_plex_price()
+      order = await self.get_plex_order()
       timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
       
-      if price is not None:
-        self.last_price = price
-        message = f"🔄 [{timestamp}]\nPLEX цена: {price:,.2f} ISK"
+      if order is not None:
+        self.last_price = order['price']
+        message = (
+          f"💰 <b>Текущая цена PLEX</b>\n"
+          f"┣ Цена: {order['price']:,.2f} ISK\n"
+          f"┣ Локация: {order['location_name']}\n"
+          f"┗ Обновлено: {timestamp}"
+        )
         logger.info(f"Отправка сообщения в Telegram: {message}")
         await self.bot.send_message(message)
       else:
